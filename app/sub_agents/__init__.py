@@ -1,6 +1,5 @@
 """Sub-agents package for the multi-agent orchestrator"""
 
-from .capital_finder import capital_finder_agent
-from .city_temperature import temperature_agent
+from .news_sentiment_agent import news_sentiment_agent
 
-__all__ = ["capital_finder_agent", "temperature_agent"]
+__all__ = ["news_sentiment_agent"]
