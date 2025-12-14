@@ -145,7 +145,8 @@ def print_deployment_success(
 @click.option(
     "--location",
     default="us-central1",
-    help="GCP region (defaults to us-central1)",
+    # default="global",
+    help="GCP region (defaults to global)",
 )
 @click.option(
     "--display-name",

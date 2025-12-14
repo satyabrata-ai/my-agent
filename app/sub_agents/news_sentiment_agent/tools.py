@@ -25,29 +25,54 @@ class PersistentMemoryStore:
     
     def __init__(self):
         """Initialize persistent memory with GCS backing"""
+        # Debug: Print bucket configuration
+        print(f"🔧 Initializing PersistentMemoryStore...")
+        print(f"   GCS_DATA_BUCKET: {config.GCS_DATA_BUCKET}")
+        print(f"   GCS_MEMORY_PATH: {config.GCS_MEMORY_PATH}")
+        
         self.fs = gcsfs.GCSFileSystem() if config.GCS_DATA_BUCKET else None
-        self.memory_file = f"{config.GCS_DATA_BUCKET}/agent_memory/session_memory.json" if config.GCS_DATA_BUCKET else None
+        self.memory_file = f"{config.GCS_DATA_BUCKET}/{config.GCS_MEMORY_PATH}/session_memory.json" if config.GCS_DATA_BUCKET else None
+        
+        if self.memory_file:
+            print(f"   Memory file: {self.memory_file}")
+        
         self.memory = self._load_memory()
         self._in_memory_cache = {}  # Fast access cache
         self._dirty = False  # Track if memory needs saving
+        self._operations_since_save = 0  # Track operations for periodic saves
+        
+        # Note: atexit is unreliable with gcsfs due to thread pool shutdown
+        # Instead, we save frequently (every 3 ops) during normal operation
     
     def _load_memory(self) -> dict:
         """Load memory from GCS with fallback"""
         if not self.fs or not self.memory_file:
-            print("📝 Using in-memory only (no GCS persistence)")
+            print("=" * 70)
+            print("⚠️  WARNING: NO GCS PERSISTENCE CONFIGURED!")
+            print("=" * 70)
+            print("Memory will be lost when agent restarts.")
+            print("To enable persistence, set in .env file:")
+            print("  GCS_DATA_BUCKET=gs://your-bucket-name")
+            print("=" * 70)
             return self._init_empty_memory()
         
         try:
+            print(f"🔍 Checking for existing memory at: {self.memory_file}")
             if self.fs.exists(self.memory_file):
                 with self.fs.open(self.memory_file, 'r') as f:
                     memory = json.load(f)
                     print(f"✅ Loaded persistent memory from GCS")
+                    print(f"   Tickers analyzed: {len(memory.get('analyzed_tickers', {}))}")
+                    print(f"   Total queries: {memory.get('statistics', {}).get('total_queries', 0)}")
                     return memory
             else:
-                print("📝 Initializing new memory store")
+                print("📝 No existing memory found - initializing new store")
+                print(f"   Will create: {self.memory_file}")
                 return self._init_empty_memory()
         except Exception as e:
             print(f"⚠️  Could not load memory from GCS: {e}")
+            print(f"   This might be a permissions issue.")
+            print(f"   Ensure service account has Storage Object Admin on bucket.")
             return self._init_empty_memory()
     
     def _init_empty_memory(self) -> dict:
@@ -69,21 +94,38 @@ class PersistentMemoryStore:
         }
     
     def save_memory(self, force: bool = False):
-        """Save memory to GCS (async-friendly)"""
+        """
+        Save memory to GCS with robust error handling.
+        Designed to work during normal operation (not during Python shutdown).
+        """
         if not self._dirty and not force:
             return
         
         if not self.fs or not self.memory_file:
+            if self._operations_since_save > 0:
+                print(f"⚠️  Cannot persist {self._operations_since_save} operations (no GCS configured)")
             return  # No persistence available
         
         try:
             self.memory["last_updated"] = datetime.now().isoformat()
+            print(f"💾 Saving memory to GCS: {self.memory_file}")
             with self.fs.open(self.memory_file, 'w') as f:
                 json.dump(self.memory, f, indent=2)
             self._dirty = False
-            print(f"💾 Memory persisted to GCS")
+            self._operations_since_save = 0  # Reset counter after successful save
+            print(f"✅ Memory persisted successfully ({len(self.memory.get('analyzed_tickers', {}))} tickers)")
+        except RuntimeError as e:
+            # Handle shutdown-related errors gracefully
+            if "shutdown" in str(e).lower() or "future" in str(e).lower():
+                print(f"⚠️  Cannot save during shutdown (last {self._operations_since_save} ops may be lost)")
+            else:
+                print(f"⚠️  Failed to save memory: {e}")
+        except PermissionError as e:
+            print(f"⚠️  Permission denied saving to GCS: {e}")
+            print(f"   Service account needs 'Storage Object Admin' on bucket")
         except Exception as e:
             print(f"⚠️  Failed to save memory: {e}")
+            print(f"   Type: {type(e).__name__}")
     
     def add_analysis(self, ticker: str, analysis: dict):
         """Add ticker analysis to memory with source tracking"""
@@ -99,9 +141,11 @@ class PersistentMemoryStore:
         self.memory["analyzed_tickers"][ticker].append(entry)
         self.memory["statistics"]["unique_tickers_analyzed"] = len(self.memory["analyzed_tickers"])
         self._dirty = True
+        self._operations_since_save += 1
         
-        # Save every 10 analyses to balance performance/persistence
-        if len(self.memory["analyzed_tickers"][ticker]) % 10 == 0:
+        # Save every 3 operations for more aggressive persistence
+        # This reduces risk of data loss since atexit is unreliable with gcsfs
+        if self._operations_since_save >= 3:
             self.save_memory()
     
     def get_cached_query(self, query_key: str) -> Optional[dict]:
@@ -131,6 +175,11 @@ class PersistentMemoryStore:
         self.memory["query_cache"][query_key] = cache_entry
         self._in_memory_cache[query_key] = cache_entry
         self._dirty = True
+        self._operations_since_save += 1
+        
+        # Save every 3 operations for more aggressive persistence
+        if self._operations_since_save >= 3:
+            self.save_memory()
     
     def add_insight(self, insight: str, category: str = "general", metadata: dict = None):
         """Store an insight with metadata"""
@@ -142,6 +191,11 @@ class PersistentMemoryStore:
         }
         self.memory["insights"].append(entry)
         self._dirty = True
+        self._operations_since_save += 1
+        
+        # Save every 3 operations for more aggressive persistence
+        if self._operations_since_save >= 3:
+            self.save_memory()
     
     def get_ticker_history(self, ticker: str) -> List[dict]:
         """Get all historical analyses for a ticker"""

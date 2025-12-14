@@ -44,7 +44,7 @@ class Config:
     # GCS Data Bucket Settings
     GCS_DATA_BUCKET: str = os.getenv(
         "GCS_DATA_BUCKET",
-        ""  # No default - should be set explicitly
+        "gs://datasets-ccibt-hack25ww7-706"  # Default to known bucket
     )
     GCS_DATASET_PREFIX: str = os.getenv(
         "GCS_DATASET_PREFIX",
@@ -60,8 +60,8 @@ class Config:
     # Model Configuration
     AGENT_MODEL: str = os.getenv(
         "AGENT_MODEL",
-        # "gemini-2.5-flash"  # Default model
-        "gemini-3-pro-preview"
+        "gemini-2.5-flash"  # Default model
+        # "gemini-3-pro-preview"
     )
     
     # Environment
@@ -106,11 +106,9 @@ class Config:
         Returns:
             True if valid, raises ValueError if not
         """
-        if not self.GCS_DATA_BUCKET:
-            raise ValueError(
-                "GCS_DATA_BUCKET is required but not set. "
-                "Please set it in your .env file or environment variables."
-            )
+        if not self.GCS_DATA_BUCKET or self.GCS_DATA_BUCKET == "":
+            print("⚠️  GCS_DATA_BUCKET not set - memory will not persist!")
+            print("   Set GCS_DATA_BUCKET in .env file for persistence")
         
         if not self.GOOGLE_CLOUD_PROJECT:
             raise ValueError("GOOGLE_CLOUD_PROJECT is required")
