@@ -1,18 +1,4 @@
-# ruff: noqa
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+# app/agent.py
 import datetime
 from zoneinfo import ZoneInfo
 
@@ -22,60 +8,31 @@ from google.adk.apps.app import App
 import os
 import google.auth
 
-from app.sub_agents import capital_finder_agent, temperature_agent
-
-_, project_id = google.auth.default()
-os.environ["GOOGLE_CLOUD_PROJECT"] = "ccibt-hack25ww7-706"
-os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
-os.environ["LOGS_BUCKET_NAME"] = "gs://ccibt-agent-logs"
+from app.sub_agents.news_sentiment_agent import news_sentiment_agent
+from app.config import config  # ⬅️ Import central config
 
 
-def get_weather(query: str) -> str:
-    """Simulates a web search. Use it get information on weather.
+# Apply configuration to environment
+os.environ["GOOGLE_CLOUD_PROJECT"] = config.GOOGLE_CLOUD_PROJECT
+os.environ["GOOGLE_CLOUD_LOCATION"] = config.GOOGLE_CLOUD_LOCATION
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = config.GOOGLE_GENAI_USE_VERTEXAI
+os.environ["LOGS_BUCKET_NAME"] = config.LOGS_BUCKET_NAME
 
-    Args:
-        query: A string containing the location to get weather information for.
-
-    Returns:
-        A string with the simulated weather information for the queried location.
-    """
-    if "sf" in query.lower() or "san francisco" in query.lower():
-        return "It's 60 degrees and foggy."
-    return "It's 90 degrees and sunny. "
-
-
-def get_current_time(query: str) -> str:
-    """Simulates getting the current time for a city.
-
-    Args:
-        city: The name of the city to get the current time for.
-
-    Returns:
-        A string with the current time information.
-    """
-    if "sf" in query.lower() or "san francisco" in query.lower():
-        tz_identifier = "America/Los_Angeles"
-    else:
-        return f"Sorry, I don't have timezone information for query: {query}."
-
-    tz = ZoneInfo(tz_identifier)
-    now = datetime.datetime.now(tz)
-    return f"The current time for query {query} is {now.strftime('%Y-%m-%d %H:%M:%S %Z%z')}"
+# Optional: Print config in development
+if config.is_development:
+    print(config)
 
 
 root_agent = Agent(
-    name="root_agent",
-    model="gemini-3-pro-preview",
+    name="BondNavigator",
+    model=config.AGENT_MODEL,
     instruction=(
-        "You are a helpful AI assistant designed to provide information.\n"
-        "You may only respond by directly quoting or minimally rephrasing capital_finder_agent and/or temperature_agent.\n"
-        "You may not add, infer, or interpret information.\n"
-        "If neither agent provides a direct answer, respond with:\n"
-        "'I cannot answer this question based on the information provided by the available agents.'"
+        "You are an agentic fixed-income intelligence coordinator. "
+        "Delegate news analysis to NewsSentimentAgent and return its output clearly."
     ),
-    # tools=[get_weather, get_current_time],
-    sub_agents=[capital_finder_agent, temperature_agent]
+    sub_agents=[
+        news_sentiment_agent
+    ]
 )
 
 app = App(root_agent=root_agent, name="app")
