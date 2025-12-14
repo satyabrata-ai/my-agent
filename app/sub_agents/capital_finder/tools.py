@@ -10,7 +10,7 @@ def get_capital_by_country(country: str) -> dict:
     """
     # Mock data: dictionary of countries and their capitals
     capitals_data = {
-        "india": "Agartala",
+        "India": "New Delhi",
         "united states": "Washington, D.C.",
         "usa": "Washington, D.C.",
         "united kingdom": "London",
@@ -29,7 +29,7 @@ def get_capital_by_country(country: str) -> dict:
         "south korea": "Seoul",
         "argentina": "Buenos Aires",
         "egypt": "Cairo",
-        "south africa": "Pretoria",
+        "south africa": "Pretoria"
     }
     
     # Normalize the country name to lowercase for case-insensitive lookup

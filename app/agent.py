@@ -25,10 +25,10 @@ import google.auth
 from app.sub_agents import capital_finder_agent, temperature_agent
 
 _, project_id = google.auth.default()
-os.environ["GOOGLE_CLOUD_PROJECT"] = "rapid-will-480704-i6"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "ccibt-hack25ww7-706"
 os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
-os.environ["LOGS_BUCKET_NAME"] = "gs://satyabrata-ai-hackathon-agent"
+os.environ["LOGS_BUCKET_NAME"] = "gs://ccibt-agent-logs"
 
 
 def get_weather(query: str) -> str:
@@ -67,7 +67,13 @@ def get_current_time(query: str) -> str:
 root_agent = Agent(
     name="root_agent",
     model="gemini-3-pro-preview",
-    instruction="You are a helpful AI assistant designed to provide accurate and useful information.",
+    instruction=(
+        "You are a helpful AI assistant designed to provide information.\n"
+        "You may only respond by directly quoting or minimally rephrasing capital_finder_agent and/or temperature_agent.\n"
+        "You may not add, infer, or interpret information.\n"
+        "If neither agent provides a direct answer, respond with:\n"
+        "'I cannot answer this question based on the information provided by the available agents.'"
+    ),
     # tools=[get_weather, get_current_time],
     sub_agents=[capital_finder_agent, temperature_agent]
 )

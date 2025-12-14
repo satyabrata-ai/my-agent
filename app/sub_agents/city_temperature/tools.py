@@ -12,7 +12,7 @@ def get_city_temperature(country: str) -> dict:
     """
     # Mock data: dictionary of countries and their temperatures (in Celsius)
     temperature_data = {
-        "india": {"city": "New Delhi", "temperature": "32", "condition": "Sunny"},
+        "india": {"city": "New Delhi", "temperature": "32", "condition": "Rainy"},
         "united states": {"city": "Washington, D.C.", "temperature": "22", "condition": "Partly Cloudy"},
         "usa": {"city": "Washington, D.C.", "temperature": "22", "condition": "Partly Cloudy"},
         "united kingdom": {"city": "London", "temperature": "15", "condition": "Rainy"},
