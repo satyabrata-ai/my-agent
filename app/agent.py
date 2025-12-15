@@ -11,8 +11,13 @@ import google.auth
 from app.sub_agents.news_sentiment_agent import news_sentiment_agent
 from app.sub_agents.data_orchestrator import data_orchestrator_agent
 from app.sub_agents.realtime_alerts import realtime_alerts_agent
-from app.sub_agents.simulation_agent import simulation_agent
+
 from app.config import config  # ⬅️ Import central config
+from app.sub_agents.simulation_agent.simulation_agent import build_simulation_agent
+
+
+# 🔹 Build the simulation agent INSTANCE
+simulation_agent = build_simulation_agent(Agent)
 
 
 # Apply configuration to environment
