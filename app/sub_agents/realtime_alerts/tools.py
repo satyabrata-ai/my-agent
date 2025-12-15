@@ -47,7 +47,8 @@ def detect_high_volatility(tickers: List[str], vol_threshold: float = 0.6) -> Di
                 "severity": "high" if vol >= vol_threshold * 1.5 else "medium",
                 "metric": "HistVol_5D_Ann",
                 "metric_value": float(vol),
-                "details": {
+                    "description": f"High realized volatility ({vol:.2f}) detected",
+                    "details": {
                     "source": metrics.get("SourceTable"),
                     "sample_points": metrics.get("SamplePoints"),
                     "context": context if context else {}
@@ -74,6 +75,7 @@ def store_alerts_to_bq(alerts: List[Dict[str, Any]], table_name: str = "realtime
             "severity": a.get("severity"),
             "metric": a.get("metric"),
             "metric_value": a.get("metric_value"),
+            "description": a.get("description"),
             "details": json.dumps(a.get("details", {})),
         })
 
