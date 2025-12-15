@@ -14,9 +14,9 @@ try:
     # Load .env from project root
     env_path = Path(__file__).parent.parent / '.env'
     load_dotenv(dotenv_path=env_path)
-    print(f"✓ Loaded configuration from {env_path}")
+    print(f"[OK] Loaded configuration from {env_path}")
 except ImportError:
-    print("⚠️  python-dotenv not installed. Using system environment variables only.")
+    print("[WARNING] python-dotenv not installed. Using system environment variables only.")
     print("   Install with: pip install python-dotenv")
 
 
@@ -41,7 +41,17 @@ class Config:
         "gs://ccibt-agent-logs"
     )
     
-    # GCS Data Bucket Settings
+    # BigQuery Data Settings (Primary Data Source)
+    BIGQUERY_PROJECT: str = os.getenv(
+        "BIGQUERY_PROJECT",
+        "ccibt-hack25ww7-706"  # Default project
+    )
+    BIGQUERY_DATASET: str = os.getenv(
+        "BIGQUERY_DATASET",
+        "market_activity"  # Default dataset
+    )
+    
+    # GCS Data Bucket Settings (Backup/Legacy - keeping for memory persistence)
     GCS_DATA_BUCKET: str = os.getenv(
         "GCS_DATA_BUCKET",
         "gs://datasets-ccibt-hack25ww7-706"  # Default to known bucket
@@ -106,8 +116,14 @@ class Config:
         Returns:
             True if valid, raises ValueError if not
         """
+        if not self.BIGQUERY_PROJECT:
+            raise ValueError("BIGQUERY_PROJECT is required")
+        
+        if not self.BIGQUERY_DATASET:
+            print("[WARNING] BIGQUERY_DATASET not set - using default 'market_activity'")
+        
         if not self.GCS_DATA_BUCKET or self.GCS_DATA_BUCKET == "":
-            print("⚠️  GCS_DATA_BUCKET not set - memory will not persist!")
+            print("[WARNING] GCS_DATA_BUCKET not set - memory will not persist!")
             print("   Set GCS_DATA_BUCKET in .env file for persistence")
         
         if not self.GOOGLE_CLOUD_PROJECT:
@@ -123,6 +139,8 @@ class Config:
             f"  project={self.GOOGLE_CLOUD_PROJECT}\n"
             f"  location={self.GOOGLE_CLOUD_LOCATION}\n"
             f"  model={self.AGENT_MODEL}\n"
+            f"  bigquery_project={self.BIGQUERY_PROJECT}\n"
+            f"  bigquery_dataset={self.BIGQUERY_DATASET}\n"
             f"  data_bucket={self.GCS_DATA_BUCKET}\n"
             f"  dataset_prefix={self.GCS_DATASET_PREFIX}\n"
             f")"
@@ -135,11 +153,11 @@ config = Config()
 # Validate on import (warnings only - won't fail deployment)
 try:
     config.validate()
-    print(f"✓ Configuration validated successfully")
+    print(f"[OK] Configuration validated successfully")
     print(f"   Model: {config.AGENT_MODEL}")
     print(f"   Environment: {config.ENVIRONMENT}")
 except ValueError as e:
-    print(f"⚠️  Configuration warning: {e}")
+    print(f"[WARNING] Configuration warning: {e}")
     print(f"   Continuing with available configuration...")
 
 
