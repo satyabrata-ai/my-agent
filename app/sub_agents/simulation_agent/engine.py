@@ -40,11 +40,15 @@ def simulate_yield_changes(tenor: str, regime: str):
 
 
 def compute_metrics(simulated_changes):
+    """
+    Compute VaR and yield range metrics from simulated changes.
+    Ensures all return values are JSON-serializable Python types.
+    """
     return {
-        "VaR_95_YieldBps": round(np.percentile(simulated_changes, 5) * 10000, 2),
+        "VaR_95_YieldBps": float(round(np.percentile(simulated_changes, 5) * 10000, 2)),
         "YieldRange_Bps": [
-            round(simulated_changes.min() * 10000, 2),
-            round(simulated_changes.max() * 10000, 2)
+            float(round(simulated_changes.min() * 10000, 2)),
+            float(round(simulated_changes.max() * 10000, 2))
         ],
-        "SimCount": SIM_COUNT
+        "SimCount": int(SIM_COUNT)
     }
