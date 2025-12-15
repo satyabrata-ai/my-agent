@@ -1,7 +1,13 @@
 import pandas as pd
 import numpy as np
+import os
 
-CSV_PATH = "data/datasets_uc4-market-activity-prediction-agent_30_yr_stock_market_data.csv"
+CSV_PATH = os.path.join(
+    os.getcwd(),
+    "data",
+    "datasets_uc4-market-activity-prediction-agent_30_yr_stock_market_data.csv"
+)
+
 SIM_COUNT = 10000
 
 STRESS_REGIMES = {

@@ -1,4 +1,7 @@
-from app.simulation.simulation_agent import run_risk_simulation
+from app.sub_agents.simulation_agent.engine import (
+    simulate_yield_changes,
+    compute_metrics
+)
 
 
 def simulate_bond_risk(
@@ -6,19 +9,10 @@ def simulate_bond_risk(
     RegimeHint: str = "normal",
     ConfidenceScore: float | None = None
 ):
-    """
-    Tool wrapper for Simulation Agent.
+    results = {}
 
-    Expected input:
-    {
-      "ForecastedYields": { "5Y": 0.041 },
-      "RegimeHint": "normal",
-      "ConfidenceScore": 0.82
-    }
-    """
+    for tenor in ForecastedYields.keys():
+        simulated_changes = simulate_yield_changes(tenor, RegimeHint)
+        results[tenor] = compute_metrics(simulated_changes)
 
-    return run_risk_simulation(
-        ForecastedYields=ForecastedYields,
-        RegimeHint=RegimeHint,
-        ConfidenceScore=ConfidenceScore
-    )
+    return results
