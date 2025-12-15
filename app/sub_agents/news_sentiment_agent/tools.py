@@ -1,11 +1,12 @@
 # tools.py
 """
-Intelligent sentiment analysis tools with automatic file discovery.
-Supports both GCS and local filesystem with persistent memory.
+Intelligent sentiment analysis tools with automatic data discovery from BigQuery.
+Supports BigQuery and GCS with persistent memory.
 """
 
 import pandas as pd
 import gcsfs
+from google.cloud import bigquery
 from typing import Optional, Dict, List, Any
 import re
 import json
@@ -14,6 +15,9 @@ from collections import defaultdict
 from datetime import datetime
 
 from app.config import config
+
+# Import BigQueryDataLoader from event_impact_agent
+from app.sub_agents.event_impact_agent.tools import _data_loader as bq_loader
 
 
 class PersistentMemoryStore:
@@ -26,7 +30,7 @@ class PersistentMemoryStore:
     def __init__(self):
         """Initialize persistent memory with GCS backing"""
         # Debug: Print bucket configuration
-        print(f"🔧 Initializing PersistentMemoryStore...")
+        print(f"[MEMORY] Initializing PersistentMemoryStore...")
         print(f"   GCS_DATA_BUCKET: {config.GCS_DATA_BUCKET}")
         print(f"   GCS_MEMORY_PATH: {config.GCS_MEMORY_PATH}")
         
@@ -48,7 +52,7 @@ class PersistentMemoryStore:
         """Load memory from GCS with fallback"""
         if not self.fs or not self.memory_file:
             print("=" * 70)
-            print("⚠️  WARNING: NO GCS PERSISTENCE CONFIGURED!")
+            print("[WARNING] NO GCS PERSISTENCE CONFIGURED!")
             print("=" * 70)
             print("Memory will be lost when agent restarts.")
             print("To enable persistence, set in .env file:")
@@ -57,20 +61,20 @@ class PersistentMemoryStore:
             return self._init_empty_memory()
         
         try:
-            print(f"🔍 Checking for existing memory at: {self.memory_file}")
+            print(f"[MEMORY] Checking for existing memory at: {self.memory_file}")
             if self.fs.exists(self.memory_file):
                 with self.fs.open(self.memory_file, 'r') as f:
                     memory = json.load(f)
-                    print(f"✅ Loaded persistent memory from GCS")
+                    print(f"[SUCCESS] Loaded persistent memory from GCS")
                     print(f"   Tickers analyzed: {len(memory.get('analyzed_tickers', {}))}")
                     print(f"   Total queries: {memory.get('statistics', {}).get('total_queries', 0)}")
                     return memory
             else:
-                print("📝 No existing memory found - initializing new store")
+                print("[INFO] No existing memory found - initializing new store")
                 print(f"   Will create: {self.memory_file}")
                 return self._init_empty_memory()
         except Exception as e:
-            print(f"⚠️  Could not load memory from GCS: {e}")
+            print(f"[WARNING] Could not load memory from GCS: {e}")
             print(f"   This might be a permissions issue.")
             print(f"   Ensure service account has Storage Object Admin on bucket.")
             return self._init_empty_memory()
@@ -103,7 +107,7 @@ class PersistentMemoryStore:
         
         if not self.fs or not self.memory_file:
             if self._operations_since_save > 0:
-                print(f"⚠️  Cannot persist {self._operations_since_save} operations (no GCS configured)")
+                print(f"[WARNING] Cannot persist {self._operations_since_save} operations (no GCS configured)")
             return  # No persistence available
         
         try:
@@ -113,18 +117,18 @@ class PersistentMemoryStore:
                 json.dump(self.memory, f, indent=2)
             self._dirty = False
             self._operations_since_save = 0  # Reset counter after successful save
-            print(f"✅ Memory persisted successfully ({len(self.memory.get('analyzed_tickers', {}))} tickers)")
+            print(f"[SUCCESS] Memory persisted successfully ({len(self.memory.get('analyzed_tickers', {}))} tickers)")
         except RuntimeError as e:
             # Handle shutdown-related errors gracefully
             if "shutdown" in str(e).lower() or "future" in str(e).lower():
                 print(f"⚠️  Cannot save during shutdown (last {self._operations_since_save} ops may be lost)")
             else:
-                print(f"⚠️  Failed to save memory: {e}")
+                print(f"[WARNING] Failed to save memory: {e}")
         except PermissionError as e:
             print(f"⚠️  Permission denied saving to GCS: {e}")
             print(f"   Service account needs 'Storage Object Admin' on bucket")
         except Exception as e:
-            print(f"⚠️  Failed to save memory: {e}")
+            print(f"[WARNING] Failed to save memory: {e}")
             print(f"   Type: {type(e).__name__}")
     
     def add_analysis(self, ticker: str, analysis: dict):
@@ -232,36 +236,33 @@ class PersistentMemoryStore:
 
 class SentimentDataStore:
     """
-    Intelligent data store that automatically discovers and categorizes files.
-    Works with both GCS and local filesystem with persistent memory integration.
+    Intelligent data store that automatically discovers and categorizes data from BigQuery.
+    Works with BigQuery tables with persistent memory integration.
     Optimized for low-latency access with multi-level caching.
     """
     
     def __init__(self, memory_store: Optional['PersistentMemoryStore'] = None):
-        """Initialize data store with automatic file discovery and memory"""
-        # Determine storage backend
-        if config.GCS_DATA_BUCKET:
-            self.fs = gcsfs.GCSFileSystem()
-            self.base_path = f"{config.GCS_DATA_BUCKET}/{config.GCS_DATASET_PREFIX}"
-            self.use_gcs = True
-            print(f"☁️  Using GCS: {self.base_path}")
-        else:
-            self.base_path = Path(__file__).parent.parent.parent / "dataset"
-            self.use_gcs = False
-            print(f"💾 Using local filesystem: {self.base_path}")
+        """Initialize data store with automatic table discovery from BigQuery and memory"""
+        # Use BigQuery as primary data source
+        self.bq_loader = bq_loader  # Reuse shared BigQuery loader
+        self.use_bigquery = True
+        print(f"[BigQuery] Using BigQuery: {config.BIGQUERY_PROJECT}.{config.BIGQUERY_DATASET}")
+        
+        # Keep GCS for memory persistence (not for data loading)
+        self.fs = gcsfs.GCSFileSystem() if config.GCS_DATA_BUCKET else None
         
         # Persistent memory integration
         self.memory = memory_store or PersistentMemoryStore()
         
-        # Discover and categorize all available files
-        self.file_catalog = self._discover_and_categorize_files()
+        # Discover and categorize all available tables
+        self.file_catalog = self._discover_and_categorize_tables()
         self._data_cache = {}  # Fast in-memory cache for loaded data
         self._query_count = 0
     
-    def _discover_and_categorize_files(self) -> Dict[str, Any]:
+    def _discover_and_categorize_tables(self) -> Dict[str, Any]:
         """
-        Automatically discover and intelligently categorize all data files.
-        Returns a structured catalog of files by type and purpose.
+        Automatically discover and intelligently categorize all BigQuery tables.
+        Returns a structured catalog of tables by type and purpose.
         """
         catalog = {
             'sentiment_sources': {
@@ -284,154 +285,142 @@ class SentimentDataStore:
                 'communications': []  # Corporate filings/communications
             },
             'metadata': [],           # Dataset metadata
-            'unknown': []             # Uncategorized files
+            'unknown': []             # Uncategorized tables
         }
         
         try:
-            # Get all files
-            if self.use_gcs:
-                all_files = self.fs.ls(self.base_path)
-            else:
-                all_files = [str(f) for f in self.base_path.glob("*.csv")]
-                # Also check for transcript folders
-                transcript_folders = list(self.base_path.glob("*earnings*"))
-                for folder in transcript_folders:
-                    if folder.is_dir():
-                        catalog['sentiment_sources']['transcripts'].append(str(folder))
+            # Get all tables from BigQuery
+            all_tables = self.bq_loader.list_available_tables()
             
-            print(f"\n📂 Discovered {len(all_files)} files")
-            print("📋 Categorizing files...\n")
+            print(f"\n[DISCOVERY] Discovered {len(all_tables)} tables")
+            print("[CATEGORIZING] Categorizing tables...\n")
             
-            # Intelligent categorization by filename patterns
-            for file_path in all_files:
-                filename = str(file_path).split('/')[-1].lower()
-                
-                # Skip non-data files
-                if filename.startswith('.') or filename.endswith(('.zip', '.md', '.txt')):
-                    continue
+            # Intelligent categorization by table name patterns
+            for table_name in all_tables:
+                table_lower = table_name.lower()
                 
                 # Sentiment sources
-                if 'news' in filename or 'headline' in filename:
-                    catalog['sentiment_sources']['news'].append(file_path)
-                    print(f"  📰 News: {filename}")
+                if 'news' in table_lower or 'headline' in table_lower:
+                    catalog['sentiment_sources']['news'].append(table_name)
+                    print(f"  [NEWS] {table_name}")
                 
-                elif 'analyst' in filename or 'rating' in filename:
-                    catalog['sentiment_sources']['analyst'].append(file_path)
-                    print(f"  📊 Analyst: {filename}")
+                elif 'analyst' in table_lower or 'rating' in table_lower:
+                    catalog['sentiment_sources']['analyst'].append(table_name)
+                    print(f"  [ANALYST] {table_name}")
                 
-                elif 'transcript' in filename or 'earnings' in filename:
-                    catalog['sentiment_sources']['transcripts'].append(file_path)
-                    print(f"  🎤 Transcripts: {filename}")
+                elif 'transcript' in table_lower or 'earnings' in table_lower:
+                    catalog['sentiment_sources']['transcripts'].append(table_name)
+                    print(f"  [TRANSCRIPTS] {table_name}")
                 
                 # Market data
-                elif ('stock_market' in filename or 'market_data' in filename or 
-                      '30_yr' in filename or '_yr_' in filename):
-                    catalog['market_data']['prices'].append(file_path)
-                    print(f"  📈 Market: {filename}")
+                elif ('stock_market' in table_lower or 'market_data' in table_lower or 
+                      '30_yr' in table_lower or '_yr_' in table_lower or 'prices' in table_lower):
+                    catalog['market_data']['prices'].append(table_name)
+                    print(f"  [MARKET] {table_name}")
                 
-                elif 'index' in filename and 'data' in filename:
-                    catalog['market_data']['indices'].append(file_path)
-                    print(f"  📉 Index: {filename}")
+                elif 'index' in table_lower and 'data' in table_lower:
+                    catalog['market_data']['indices'].append(table_name)
+                    print(f"  [INDEX] {table_name}")
                 
-                elif 'economic' in filename or 'indicator' in filename:
-                    catalog['market_data']['economic'].append(file_path)
-                    print(f"  💹 Economic: {filename}")
+                elif 'economic' in table_lower or 'indicator' in table_lower:
+                    catalog['market_data']['economic'].append(table_name)
+                    print(f"  💹 Economic: {table_name}")
                 
                 # Company info
-                elif 'sp500' in filename or 's&p' in filename or 's_p_500' in filename:
-                    catalog['company_info']['sp500'].append(file_path)
-                    print(f"  🏢 S&P 500: {filename}")
+                elif 'sp500' in table_lower or 's_p_500' in table_lower:
+                    catalog['company_info']['sp500'].append(table_name)
+                    print(f"  [SP500] {table_name}")
                 
-                elif 'companies' in filename or 'company' in filename:
-                    catalog['company_info']['companies'].append(file_path)
-                    print(f"  🏢 Companies: {filename}")
+                elif 'companies' in table_lower or 'company' in table_lower:
+                    catalog['company_info']['companies'].append(table_name)
+                    print(f"  [COMPANIES] {table_name}")
                 
-                elif 'symbol' in filename or 'ticker' in filename or 'meta' in filename:
-                    catalog['company_info']['symbols'].append(file_path)
-                    print(f"  🔤 Symbols: {filename}")
+                elif 'symbol' in table_lower or 'ticker' in table_lower or 'meta' in table_lower:
+                    catalog['company_info']['symbols'].append(table_name)
+                    print(f"  [SYMBOLS] {table_name}")
                 
                 # Corporate actions
-                elif 'acquisition' in filename or 'merger' in filename or 'm&a' in filename:
-                    catalog['corporate_actions']['acquisitions'].append(file_path)
-                    print(f"  🤝 M&A: {filename}")
+                elif 'acquisition' in table_lower or 'merger' in table_lower:
+                    catalog['corporate_actions']['acquisitions'].append(table_name)
+                    print(f"  [M&A] {table_name}")
                 
-                elif 'communication' in filename or 'filing' in filename:
-                    catalog['corporate_actions']['communications'].append(file_path)
-                    print(f"  📢 Comms: {filename}")
+                elif 'communication' in table_lower or 'filing' in table_lower:
+                    catalog['corporate_actions']['communications'].append(table_name)
+                    print(f"  [COMMS] {table_name}")
                 
                 # Metadata
-                elif 'summary' in filename or 'metadata' in filename or 'ds_store' in filename:
-                    catalog['metadata'].append(file_path)
-                    print(f"  ℹ️  Meta: {filename}")
+                elif 'summary' in table_lower or 'metadata' in table_lower:
+                    catalog['metadata'].append(table_name)
+                    print(f"  [META] {table_name}")
                 
                 else:
-                    catalog['unknown'].append(file_path)
-                    print(f"  ❓ Other: {filename}")
+                    catalog['unknown'].append(table_name)
+                    print(f"  [OTHER] {table_name}")
             
-            print(f"\n✅ File discovery complete!")
+            print(f"\n[COMPLETE] Table discovery complete!")
             return catalog
             
         except Exception as e:
-            print(f"❌ Error discovering files: {e}")
+            print(f"[ERROR] Error discovering files: {e}")
             import traceback
             traceback.print_exc()
             return catalog
     
-    def get_files_for_intent(self, intent: str) -> List[str]:
+    def get_tables_for_intent(self, intent: str) -> List[str]:
         """
-        Get relevant file paths based on user intent.
+        Get relevant BigQuery table names based on user intent.
         
         Args:
             intent: One of 'sentiment', 'news', 'analyst', 'transcripts', 
                     'market', 'economic', 'company', 'comprehensive', 'all'
         
         Returns:
-            List of file paths relevant to the intent
+            List of table names relevant to the intent
         """
-        files = []
+        tables = []
         
         intent = intent.lower()
         
         if intent in ['sentiment', 'news']:
-            files.extend(self.file_catalog['sentiment_sources']['news'])
+            tables.extend(self.file_catalog['sentiment_sources']['news'])
         
         elif intent == 'analyst':
-            files.extend(self.file_catalog['sentiment_sources']['analyst'])
+            tables.extend(self.file_catalog['sentiment_sources']['analyst'])
         
         elif intent in ['transcripts', 'earnings']:
-            files.extend(self.file_catalog['sentiment_sources']['transcripts'])
+            tables.extend(self.file_catalog['sentiment_sources']['transcripts'])
         
         elif intent == 'market':
-            files.extend(self.file_catalog['market_data']['prices'])
-            files.extend(self.file_catalog['market_data']['indices'])
+            tables.extend(self.file_catalog['market_data']['prices'])
+            tables.extend(self.file_catalog['market_data']['indices'])
         
         elif intent == 'economic':
-            files.extend(self.file_catalog['market_data']['economic'])
+            tables.extend(self.file_catalog['market_data']['economic'])
         
         elif intent == 'company':
-            files.extend(self.file_catalog['company_info']['companies'])
-            files.extend(self.file_catalog['company_info']['sp500'])
-            files.extend(self.file_catalog['company_info']['symbols'])
+            tables.extend(self.file_catalog['company_info']['companies'])
+            tables.extend(self.file_catalog['company_info']['sp500'])
+            tables.extend(self.file_catalog['company_info']['symbols'])
         
         elif intent in ['comprehensive', 'all']:
             # Return all sentiment-related sources
-            files.extend(self.file_catalog['sentiment_sources']['news'])
-            files.extend(self.file_catalog['sentiment_sources']['analyst'])
+            tables.extend(self.file_catalog['sentiment_sources']['news'])
+            tables.extend(self.file_catalog['sentiment_sources']['analyst'])
         
-        return files
+        return tables
     
     def smart_query(self, intent: str, filters: Optional[Dict] = None, max_rows: Optional[int] = None) -> pd.DataFrame:
         """
         Intelligently query data based on intent with caching for low latency.
-        Automatically selects and reads the right files.
+        Automatically selects and reads the right BigQuery tables.
         
         Args:
             intent: What type of data to retrieve
             filters: Optional filters (ticker, date_range, sentiment, etc.)
-            max_rows: Optional limit on rows per file
+            max_rows: Optional limit on rows per table
         
         Returns:
-            Combined DataFrame with data from relevant files
+            Combined DataFrame with data from relevant tables
         """
         self._query_count += 1
         filters = filters or {}
@@ -442,80 +431,64 @@ class SentimentDataStore:
         # Check cache for low-latency access
         cached_result = self.memory.get_cached_query(cache_key)
         if cached_result and cached_result.get("result"):
-            print(f"⚡ Cache hit! Returning cached data (query #{self._query_count})")
+            print(f"[CACHE HIT] Cache hit! Returning cached data (query #{self._query_count})")
             # Return cached DataFrame
             return pd.DataFrame(cached_result["result"].get("data", []))
         
-        relevant_files = self.get_files_for_intent(intent)
+        relevant_tables = self.get_tables_for_intent(intent)
         
-        if not relevant_files:
-            print(f"⚠️  No files found for intent: {intent}")
+        if not relevant_tables:
+            print(f"[WARNING] No tables found for intent: {intent}")
             return pd.DataFrame()
         
-        print(f"🔍 Querying {len(relevant_files)} file(s) for intent: {intent} (query #{self._query_count})")
+        print(f"[QUERY] Querying {len(relevant_tables)} table(s) for intent: {intent} (query #{self._query_count})")
         
         all_data = []
         sources_used = []
         
-        for file_path in relevant_files:
+        for table_name in relevant_tables:
             try:
-                # Read file
-                if self.use_gcs:
-                    with self.fs.open(file_path, 'r') as f:
-                        if max_rows:
-                            df = pd.read_csv(f, nrows=max_rows)
-                        else:
-                            df = pd.read_csv(f)
-                else:
-                    if max_rows:
-                        df = pd.read_csv(file_path, nrows=max_rows)
-                    else:
-                        df = pd.read_csv(file_path)
+                # Build WHERE clause based on filters
+                where_conditions = []
                 
-                if df.empty:
-                    continue
-                
-                # Apply filters if provided
                 if filters:
-                    # Filter by ticker/stock
+                    # Filter by ticker/stock (most common column names)
                     if 'ticker' in filters:
                         ticker = filters['ticker'].upper()
-                        if 'stock' in df.columns:
-                            df = df[df['stock'].str.upper() == ticker]
-                        elif 'Stock' in df.columns:
-                            df = df[df['Stock'].str.upper() == ticker]
-                        elif 'ticker' in df.columns:
-                            df = df[df['ticker'].str.upper() == ticker]
+                        where_conditions.append(f"(UPPER(stock) = '{ticker}' OR UPPER(Stock) = '{ticker}' OR UPPER(ticker) = '{ticker}' OR UPPER(Symbol) = '{ticker}')")
                     
                     # Filter by date range
                     if 'start_date' in filters:
-                        if 'date' in df.columns:
-                            df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                            df = df[df['date'] >= filters['start_date']]
-                        elif 'Date' in df.columns:
-                            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-                            df = df[df['Date'] >= filters['start_date']]
+                        where_conditions.append(f"(date >= '{filters['start_date']}' OR Date >= '{filters['start_date']}')")
+                    
+                    if 'end_date' in filters:
+                        where_conditions.append(f"(date <= '{filters['end_date']}' OR Date <= '{filters['end_date']}')")
                     
                     # Filter by sentiment
                     if 'sentiment' in filters:
                         sentiment_val = filters['sentiment'].lower()
-                        if 'label' in df.columns:
-                            df = df[df['label'].str.lower() == sentiment_val]
-                        elif 'sentiment' in df.columns:
-                            df = df[df['sentiment'].str.lower() == sentiment_val]
+                        where_conditions.append(f"(LOWER(label) = '{sentiment_val}' OR LOWER(sentiment) = '{sentiment_val}')")
                 
-                if not df.empty:
-                    # Add source file tracking
-                    filename = str(file_path).split('/')[-1]
-                    df['_source_file'] = filename
-                    df['_source_path'] = str(file_path)
-                    all_data.append(df)
-                    sources_used.append(filename)
-                    print(f"  ✓ Loaded {len(df)} rows from {filename}")
+                where_clause = " AND ".join(where_conditions) if where_conditions else None
+                
+                # Load data from BigQuery with optional filtering
+                df = self.bq_loader.load_table_from_bigquery(table_name, where_clause=where_clause)
+                
+                if max_rows and len(df) > max_rows:
+                    df = df.head(max_rows)
+                
+                if df.empty:
+                    continue
+                
+                # Add source tracking
+                df['_source_table'] = table_name
+                df['_source_type'] = 'bigquery'
+                all_data.append(df)
+                sources_used.append(table_name)
+                print(f"  ✓ Loaded {len(df)} rows from {table_name}")
                     
             except Exception as e:
-                filename = str(file_path).split('/')[-1]
-                print(f"  ✗ Error reading {filename}: {e}")
+                print(f"  [ERROR] Error reading {table_name}: {e}")
         
         if all_data:
             result = pd.concat(all_data, ignore_index=True)
@@ -533,15 +506,15 @@ class SentimentDataStore:
             
             return result
         
-        print(f"⚠️  No data retrieved")
+        print(f"[WARNING] No data retrieved")
         return pd.DataFrame()
 
 
 # Initialize global memory and data store
-print("\n🚀 Initializing Persistent Memory & Data Store...")
+print("\n[INIT] Initializing Persistent Memory & Data Store...")
 persistent_memory = PersistentMemoryStore()
 data_store = SentimentDataStore(memory_store=persistent_memory)
-print("✅ Data store with persistent memory ready!\n")
+print("[READY] Data store with persistent memory ready!\n")
 
 
 # ============================================================================
@@ -561,7 +534,7 @@ def analyze_news_headline(headline: str) -> dict:
         Structured JSON dictionary with sentiment analysis and datasources
     """
     try:
-        print(f"\n🔍 Analyzing headline: '{headline[:50]}...'")
+        print(f"\n[ANALYZE] Analyzing headline: '{headline[:50]}...'")
         
         # Check memory for similar queries (low latency)
         cache_key = f"headline_{headline[:100]}"
@@ -757,7 +730,7 @@ def analyze_analyst_sentiment(company_ticker: str, days_lookback: int = 5000) ->
     """
     try:
         ticker_upper = company_ticker.upper()
-        print(f"\n📊 Analyzing analyst sentiment for {ticker_upper}")
+        print(f"\n[ANALYST] Analyzing analyst sentiment for {ticker_upper}")
         
         # Check memory cache for low latency
         cache_key = f"analyst_{ticker_upper}_{days_lookback}"
@@ -961,7 +934,7 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
         total_records = 0
         
         # 1. Get news sentiment
-        print("  📰 Querying news data...")
+        print("  [NEWS] Querying news data...")
         result["datasources"]["sources_queried"].append("news")
         news_df = data_store.smart_query('news', filters={'ticker': ticker_upper})
         
@@ -1037,7 +1010,7 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
         
         # 3. Check for transcripts
         if include_transcripts:
-            print("  🎤 Checking for earnings transcripts...")
+            print("  [TRANSCRIPTS] Checking for earnings transcripts...")
             result["datasources"]["sources_queried"].append("transcripts")
             transcript_files = data_store.get_files_for_intent('transcripts')
             matching_transcripts = [f for f in transcript_files if ticker_upper in str(f).upper()]
@@ -1093,8 +1066,8 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
                     "interpretation": f"Composite sentiment for {ticker_upper} is {overall} based on {len(sentiment_scores)} source(s)"
                 }
             
-            print(f"\n✅ Comprehensive analysis complete: {result['result']['overall_sentiment'].upper()}")
-            print(f"   📊 {len(sources_with_data)} source(s), {total_records} records analyzed")
+            print(f"\n[COMPLETE] Comprehensive analysis complete: {result['result']['overall_sentiment'].upper()}")
+            print(f"   [STATS] {len(sources_with_data)} source(s), {total_records} records analyzed")
             
         else:
             result["status"] = "no_data"
@@ -1142,7 +1115,7 @@ def get_sentiment_statistics(source: str = "all") -> dict:
         Structured JSON dictionary with sentiment distribution statistics
     """
     try:
-        print(f"\n📈 Getting sentiment statistics for: {source}")
+        print(f"\n[STATS] Getting sentiment statistics for: {source}")
         
         # Check cache for low latency
         cache_key = f"statistics_{source}"
@@ -1177,7 +1150,7 @@ def get_sentiment_statistics(source: str = "all") -> dict:
         total_records = 0
         
         if source in ["news", "all"]:
-            print("  📰 Analyzing news data...")
+            print("  [NEWS] Analyzing news data...")
             df = data_store.smart_query('news', max_rows=10000)  # Limit for performance
             
             if not df.empty:
@@ -1282,7 +1255,7 @@ def get_sentiment_statistics(source: str = "all") -> dict:
         else:
             result["status"] = "no_data"
             result["result"]["message"] = f"No data available for source: {source}"
-            print(f"\n⚠️  No data found for source: {source}")
+            print(f"\n[WARNING] No data found for source: {source}")
         
         # Cache for future queries
         persistent_memory.cache_query(cache_key, result, ttl_minutes=60)
@@ -1348,7 +1321,7 @@ def recall_ticker_history(ticker: str) -> dict:
         }
         
         if history:
-            print(f"✅ Found {len(history)} historical analysis(es) for {ticker_upper}")
+            print(f"[SUCCESS] Found {len(history)} historical analysis(es) for {ticker_upper}")
         else:
             print(f"⚠️  No historical data for {ticker_upper}")
             result["result"]["message"] = f"No previous analyses found for {ticker_upper}"
@@ -1381,7 +1354,7 @@ def search_agent_memory(query: str) -> dict:
         Structured JSON with matching memory entries
     """
     try:
-        print(f"\n🔍 Searching memory for: {query}")
+        print(f"\n[SEARCH] Searching memory for: {query}")
         
         search_results = persistent_memory.search_memory(query)
         
@@ -1436,7 +1409,7 @@ def get_memory_statistics() -> dict:
         Structured JSON with memory statistics
     """
     try:
-        print(f"\n📊 Retrieving memory statistics")
+        print(f"\n[MEMORY] Retrieving memory statistics")
         
         memory_stats = persistent_memory.memory.get("statistics", {})
         
@@ -1476,7 +1449,7 @@ def get_memory_statistics() -> dict:
             }
         }
         
-        print(f"✅ Memory statistics retrieved")
+        print(f"[SUCCESS] Memory statistics retrieved")
         
         return result
         
