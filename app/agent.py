@@ -11,6 +11,7 @@ import google.auth
 from app.sub_agents.news_sentiment_agent import news_sentiment_agent
 from app.sub_agents.data_orchestrator import data_orchestrator_agent
 from app.sub_agents.realtime_alerts import realtime_alerts_agent
+from app.sub_agents.simulation_agent import simulation_agent
 from app.config import config  # ⬅️ Import central config
 
 
@@ -41,6 +42,7 @@ root_agent = Agent(
         news_sentiment_agent,
         data_orchestrator_agent,
         realtime_alerts_agent,
+        simulation_agent
     ]
 )
 
