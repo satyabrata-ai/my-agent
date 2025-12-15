@@ -12,6 +12,7 @@ def test_detect_high_volatility_triggers_alert(monkeypatch):
     assert res["status"] == "success"
     assert len(res["alerts"]) == 1
     assert res["alerts"][0]["ticker"] == "AAPL"
+    assert "description" in res["alerts"][0]
 
 
 def test_publish_alert_event_uses_pubsub_and_webhook(monkeypatch):
@@ -66,6 +67,7 @@ def test_store_alerts_to_bq_calls_insert(monkeypatch):
     assert res["status"] == "success"
     assert inserted['table_id'] == "proj.ds.realtime_alerts"
     assert len(inserted['rows']) == 1
+    assert 'description' in inserted['rows'][0]
 
 
 def test_get_active_alerts_queries_bq(monkeypatch):
@@ -80,3 +82,5 @@ def test_get_active_alerts_queries_bq(monkeypatch):
     assert res["status"] == "success"
     assert len(res["alerts"]) == 1
     assert res["alerts"][0]["ticker"] == "AAPL"
+    # When details is JSON string it should have been parsed; description may be absent in some DB rows
+    assert isinstance(res["alerts"][0]["details"], dict)

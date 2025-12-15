@@ -6,5 +6,6 @@ def test_realtime_alerts_sql_exists_and_has_expected_columns():
     txt = path.read_text()
     assert "CREATE TABLE" in txt
     assert "realtime_alerts" in txt
+    assert "description" in txt
     assert "details JSON" in txt
     assert "PARTITION BY DATE(timestamp)" in txt
