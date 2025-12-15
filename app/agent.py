@@ -10,6 +10,7 @@ import google.auth
 
 from app.sub_agents.news_sentiment_agent import news_sentiment_agent
 from app.sub_agents.data_orchestrator import data_orchestrator_agent
+from app.sub_agents.realtime_alerts import realtime_alerts_agent
 from app.config import config  # ⬅️ Import central config
 
 
@@ -29,13 +30,17 @@ root_agent = Agent(
     model=config.AGENT_MODEL,
     instruction=(
         "You are an agentic fixed-income intelligence coordinator. "
-        "Delegate news analysis to NewsSentimentAgent and ensure it fetches all market/news data via the Data Orchestrator. "
-        "When NewsSentimentAgent requires fresh data, it must call Data Orchestrator's `get_sentiment_sources()` and only the following BigQuery tables may be accessed: `stock_news`, `30_yr_stock_market_data`, `US_Economic_Indicators`, `combined_transcripts`. "
-        "Do not allow direct BigQuery access from NewsSentimentAgent; always route through Data Orchestrator."
+            "Delegate news analysis to NewsSentimentAgent and ensure it fetches all market/news data via the Data Orchestrator. "
+            "When NewsSentimentAgent requires fresh data, it must call Data Orchestrator's `get_sentiment_sources()` and only the following BigQuery tables may be accessed: `stock_news`, `30_yr_stock_market_data`, `US_Economic_Indicators`, `combined_transcripts`. "
+            "Do not allow direct BigQuery access from NewsSentimentAgent; always route through Data Orchestrator. "
+            "For any user request about real-time volatility, imminent high-volatility periods, or significant market shifts, delegate the task to RealtimeAlertsAgent. "
+            "RealtimeAlertsAgent must be used to detect, persist, and publish alerts (use `detect_high_volatility`, `store_alerts_to_bq`, `publish_alert_event`, and `get_active_alerts`). "
+            "Do not attempt to answer or query live volatility data yourself; always call RealtimeAlertsAgent for these requests."
     ),
     sub_agents=[
         news_sentiment_agent,
-        data_orchestrator_agent
+        data_orchestrator_agent,
+        realtime_alerts_agent,
     ]
 )
 

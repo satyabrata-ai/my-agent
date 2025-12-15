@@ -73,6 +73,16 @@ class Config:
     # Environment
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
+    # Alerting settings
+    ALERTS_PUBSUB_TOPIC: Optional[str] = os.getenv(
+        "ALERTS_PUBSUB_TOPIC",
+        None
+    )
+    ALERTS_WEBHOOK_URL: Optional[str] = os.getenv(
+        "ALERTS_WEBHOOK_URL",
+        None
+    )
+
     # Computed properties
     @property
     def dataset_path(self) -> str:

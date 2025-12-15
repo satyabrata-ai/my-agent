@@ -220,6 +220,41 @@ def get_sentiment_sources(ticker: Optional[str] = None, limit: int = 1000) -> Di
     return out
 
 
+def get_table_rows(table_name: str, ticker: Optional[str] = None, limit: int = 1000) -> Dict[str, Any]:
+    """Return rows from a specific BigQuery table using the Data Orchestrator.
+
+    This is a minimal, auditable access point for other agents to read
+    required tables (e.g., economic, market, index tables).
+    """
+    full_table = f"{_bq_store.project}.{_bq_store.dataset}.{table_name}"
+    where = f"WHERE UPPER(ticker) = '{ticker.upper()}'" if ticker else ""
+    sql = f"SELECT * FROM `{full_table}` {where} LIMIT {limit}"
+    try:
+        df = _bq_store.query_to_df(sql)
+        rows = df.head(limit).to_dict(orient='records') if not df.empty else []
+        return {"status": "success", "row_count": len(rows), "rows": rows}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "row_count": 0, "rows": []}
+
+
+def get_market_economic_data(ticker: Optional[str] = None, limit: int = 1000) -> Dict[str, Any]:
+    """Fetch canonical market & economic tables used by downstream agents.
+
+    Returns a dict with keys: `market` -> 30_yr_stock_market_data,
+    `economic` -> US_Economic_Indicators, `index` -> indexData
+    """
+    tables = {
+        "market": "30_yr_stock_market_data",
+        "economic": "US_Economic_Indicators",
+        "index": "indexData",
+    }
+    out = {"status": "success", "tables": {}}
+    for key, tbl in tables.items():
+        out_tbl = get_table_rows(tbl, ticker=ticker, limit=limit)
+        out["tables"][key] = out_tbl
+    return out
+
+
 __all__ = [
     "discover_bq_tables",
     "query_table",
@@ -228,6 +263,8 @@ __all__ = [
     "clean_price_dataframe",
     "compute_event_impact",
     "get_sentiment_sources",
+    "get_table_rows",
+    "get_market_economic_data",
 ]
 
 
