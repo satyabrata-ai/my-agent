@@ -50,6 +50,12 @@ class Config:
         "GCS_DATASET_PREFIX",
         "datasets/uc4-market-activity-prediction-agent"
     )
+
+    # BigQuery dataset name containing market activity data
+    BIGQUERY_DATASET: str = os.getenv(
+        "BIGQUERY_DATASET",
+        "market_activity"
+    )
     
     # Agent Memory Settings
     GCS_MEMORY_PATH: str = os.getenv(

@@ -7,7 +7,9 @@ from .tools import (
     get_sentiment_statistics,
     recall_ticker_history,
     search_agent_memory,
-    get_memory_statistics
+    get_memory_statistics,
+    # Data Orchestrator access: canonical sentiment sources
+    get_sentiment_sources,
 )
 
 news_sentiment_agent = Agent(
@@ -33,12 +35,14 @@ news_sentiment_agent = Agent(
     - Source file tracking for full data attribution
     - Smart query deduplication
     
-    📦 DATA SOURCES (Auto-Discovered from GCS):
-    ✓ Stock news headlines - categorized and indexed
-    ✓ Analyst ratings/recommendations - sentiment extracted
-    ✓ Earnings call transcripts - automatically found
-    ✓ Market data & economic indicators - ready to query
-    ✓ S&P 500 company metadata - available on demand
+    📦 DATA SOURCES (Canonical via Data Orchestrator):
+    - All market & news data MUST be fetched via the Data Orchestrator tool `get_sentiment_sources()`.
+    - The Data Orchestrator will only access these BigQuery tables when invoked by this agent:
+      * `stock_news`
+      * `30_yr_stock_market_data`
+      * `US_Economic_Indicators`
+      * `combined_transcripts`
+    - Analyst ratings and other local files are still available via the agent's local discovery pipeline.
     
     ═══════════════════════════════════════════════════════════════════════════
     🛠️  YOUR TOOLKIT (7 TOOLS)
@@ -48,7 +52,7 @@ news_sentiment_agent = Agent(
        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
        PURPOSE: Analyze sentiment of a specific news headline
        FEATURES:
-       - Searches ALL news files automatically
+       - Fetches canonical news from Data Orchestrator (`stock_news` table)
        - Exact match + keyword-based similarity
        - Caches results for 60 minutes
        - Returns structured JSON with datasource attribution
@@ -397,6 +401,8 @@ news_sentiment_agent = Agent(
     """,
     tools=[
         analyze_news_headline,
+        # Canonical data provider for sentiment analysis
+        get_sentiment_sources,
         analyze_analyst_sentiment,
         get_comprehensive_sentiment,
         get_sentiment_statistics,

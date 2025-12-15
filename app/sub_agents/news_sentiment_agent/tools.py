@@ -14,6 +14,8 @@ from collections import defaultdict
 from datetime import datetime
 
 from app.config import config
+# Data Orchestrator helper - canonical data for sentiment analysis
+from app.sub_agents.data_orchestrator.tools import get_sentiment_sources
 
 
 class PersistentMemoryStore:
@@ -960,22 +962,26 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
         sources_with_data = []
         total_records = 0
         
-        # 1. Get news sentiment
-        print("  📰 Querying news data...")
+        # 1. Get news sentiment (via Data Orchestrator)
+        print("  📰 Querying news data via Data Orchestrator...")
         result["datasources"]["sources_queried"].append("news")
-        news_df = data_store.smart_query('news', filters={'ticker': ticker_upper})
-        
+        # Use canonical tables: stock_news, 30_yr_stock_market_data, US_Economic_Indicators, combined_transcripts
+        ds = get_sentiment_sources(ticker_upper, limit=1000)
+        news_rows = ds.get('tables', {}).get('stock_news', {}).get('rows', [])
+        news_df = pd.DataFrame(news_rows)
+
         if not news_df.empty:
             sources_with_data.append("news")
-            news_files = news_df['_source_file'].unique().tolist() if '_source_file' in news_df.columns else []
-            
+            # No reliable _source_file in BQ rows; report source table instead
+            news_files = ["bq:stock_news"] if news_rows else []
+
             if 'label' in news_df.columns:
                 news_sentiment = news_df['label'].value_counts().to_dict()
                 total_positive = news_sentiment.get('positive', 0)
                 total_negative = news_sentiment.get('negative', 0)
                 total_neutral = news_sentiment.get('neutral', 0)
                 total_news = len(news_df)
-                
+
                 result["result"]["sentiment_by_source"]["news"] = {
                     "sentiment_distribution": news_sentiment,
                     "total_articles": total_news,
@@ -984,12 +990,12 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
                     "sentiment_score": round((total_positive - total_negative) / total_news, 3) if total_news > 0 else 0,
                     "sample_headlines": news_df.head(3)['headline'].tolist() if 'headline' in news_df.columns else []
                 }
-                
+
                 result["datasources"]["files_by_source"]["news"] = news_files
                 result["datasources"]["total_records_by_source"]["news"] = total_news
                 total_records += total_news
-                
-                print(f"    ✓ Found {total_news} news articles from {len(news_files)} file(s)")
+
+                print(f"    ✓ Found {total_news} news articles from BigQuery")
         
         # 2. Get analyst sentiment
         print("  📊 Querying analyst data...")
@@ -1035,27 +1041,42 @@ def get_comprehensive_sentiment(company_ticker: str, include_transcripts: bool =
             
             print(f"    ✓ Found {total_analyst} analyst ratings from {len(analyst_files)} file(s)")
         
-        # 3. Check for transcripts
+        # 3. Check for transcripts (via Data Orchestrator)
         if include_transcripts:
-            print("  🎤 Checking for earnings transcripts...")
+            print("  🎤 Checking for earnings transcripts via Data Orchestrator...")
             result["datasources"]["sources_queried"].append("transcripts")
-            transcript_files = data_store.get_files_for_intent('transcripts')
-            matching_transcripts = [f for f in transcript_files if ticker_upper in str(f).upper()]
-            
-            if matching_transcripts:
+            transcript_rows = ds.get('tables', {}).get('transcripts', {}).get('rows', [])
+            transcript_df = pd.DataFrame(transcript_rows)
+
+            if not transcript_df.empty:
                 sources_with_data.append("transcripts")
-                transcript_names = [str(f).split('/')[-1] for f in matching_transcripts]
-                
+                transcript_names = transcript_df.head(5).to_dict(orient='records')
+
                 result["result"]["sentiment_by_source"]["transcripts"] = {
-                    "count": len(matching_transcripts),
+                    "count": len(transcript_df),
                     "available": True,
                     "files": transcript_names
                 }
-                
-                result["datasources"]["files_by_source"]["transcripts"] = transcript_names
-                result["datasources"]["total_records_by_source"]["transcripts"] = len(matching_transcripts)
-                
-                print(f"    ✓ Found {len(matching_transcripts)} transcript(s)")
+
+                result["datasources"]["files_by_source"]["transcripts"] = ["bq:combined_transcripts"]
+                result["datasources"]["total_records_by_source"]["transcripts"] = len(transcript_df)
+
+                print(f"    ✓ Found {len(transcript_df)} transcript(s) from BigQuery")
+        # 4. Add market & economic context from Data Orchestrator
+        market_rows = ds.get('tables', {}).get('market_data', {}).get('rows', [])
+        econ_rows = ds.get('tables', {}).get('economic', {}).get('rows', [])
+
+        if market_rows:
+            result["datasources"]["sources_queried"].append("market")
+            result["datasources"]["files_by_source"]["market"] = ["bq:30_yr_stock_market_data"]
+            result["datasources"]["total_records_by_source"]["market"] = len(market_rows)
+            total_records += len(market_rows)
+
+        if econ_rows:
+            result["datasources"]["sources_queried"].append("economic")
+            result["datasources"]["files_by_source"]["economic"] = ["bq:US_Economic_Indicators"]
+            result["datasources"]["total_records_by_source"]["economic"] = len(econ_rows)
+            total_records += len(econ_rows)
         
         # Aggregate overall sentiment
         result["datasources"]["sources_with_data"] = sources_with_data

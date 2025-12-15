@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .agent import app
+try:
+	# Import the ADK app lazily; in test/dev environments some dependencies
+	# (google.adk) may not be installed, so avoid raising on import.
+	from .agent import app  # type: ignore
+except Exception:
+	app = None
 
 __all__ = ["app"]
