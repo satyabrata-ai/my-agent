@@ -219,6 +219,19 @@ def get_sentiment_sources(ticker: Optional[str] = None, limit: int = 1000) -> Di
 
     return out
 
+def get_yield_curve_data(ticker: Optional[str] = None, limit: int = 1000) -> Dict[str, Any]:
+    allowed = {
+        "yield_curve_daily": "yield_curve_daily",
+    }
+
+    out = {"status": "success", "tables": {}}
+
+    for key, table_name in allowed.items():
+        full_table = f"{_bq_store.project}.{_bq_store.dataset}.{table_name}"
+        sql = f"SELECT * FROM `{full_table}` LIMIT {limit}"
+        df = _bq_store.query_to_df(sql)
+    return df
+
 
 def get_table_rows(table_name: str, ticker: Optional[str] = None, limit: int = 1000) -> Dict[str, Any]:
     """Return rows from a specific BigQuery table using the Data Orchestrator.

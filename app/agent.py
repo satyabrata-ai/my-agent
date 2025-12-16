@@ -2,7 +2,7 @@
 import datetime
 from zoneinfo import ZoneInfo
 
-from google.adk.agents import Agent
+from google.adk.agents import Agent, SequentialAgent
 from google.adk.apps.app import App
 
 import os
@@ -14,10 +14,8 @@ from app.sub_agents.realtime_alerts import realtime_alerts_agent
 from app.sub_agents.event_impact_agent import event_impact_agent
 from app.config import config  # ⬅️ Import central config
 from app.sub_agents.simulation_agent import build_simulation_agent
+from app.sub_agents.predictor_agent.agent import predictor_agent
 
-
-# 🔹 Build the simulation agent INSTANCE
-simulation_agent = build_simulation_agent(Agent)
 
 
 # Apply configuration to environment
@@ -29,7 +27,6 @@ os.environ["LOGS_BUCKET_NAME"] = config.LOGS_BUCKET_NAME
 # Optional: Print config in development
 if config.is_development:
     print(config)
-
 
 root_agent = Agent(
     name="BondNavigator",
@@ -44,12 +41,14 @@ root_agent = Agent(
             "Do not attempt to answer or query live volatility data yourself; always call RealtimeAlertsAgent for these requests. "
             "For any user request about event-driven market impact, historical event correlations, or bond volatility trading strategies, delegate to EventImpactCorrelationAgent. "
             "Use EventImpactCorrelationAgent to analyze how markets react to financial events (Fed announcements, macro releases, earnings, M&A) and to provide bond volatility trading signals."
+            "For any predictions and advice about bond yields, treasury investments, or fixed-income outlooks, call the agents in this sequence and pass the output of each agent and the user query to the next : NewsSentimentAgent, EventImpactCorrelationAgent, PredictorAgent. "
     ),
     sub_agents=[
         news_sentiment_agent,
         data_orchestrator_agent,
         realtime_alerts_agent,
         event_impact_agent,
+        predictor_agent
     ]
 )
 
