@@ -23,6 +23,16 @@ def simulate_bond_risk(
         Structured JSON output to be interpreted by Gemini (Agent model)
     """
 
+
+    required = {"5Y", "10Y", "30Y"}
+    missing = required - ForecastedYields.keys()
+
+    if missing:
+        return {
+            "status": "error",
+            "message": f"Missing required tenors: {sorted(missing)}"
+        }
+    
     # Validate regime
     if RegimeHint not in STRESS_REGIMES:
         return {
