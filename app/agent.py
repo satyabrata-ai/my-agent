@@ -48,7 +48,7 @@ root_agent = Agent(
         data_orchestrator_agent,
         realtime_alerts_agent,
         event_impact_agent,
-        predictor_agent
+        simulation_agent,
     ]
 )
 
